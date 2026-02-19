@@ -154,6 +154,8 @@ esp_wifi_tx.wifi_80211_tx(esp_wifi_tx.WIFI_IF_STA, frame)
 
 This module is provided as-is for educational and research purposes.
 
+🚧Disclaimer🚧
+In this repository the use of ai can be seen please if you see any error create pull request 
 ---
 
 **Version**: 0.1.0  
