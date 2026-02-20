@@ -38,15 +38,20 @@ jobs:
           make -C mpy-cross
           
           cd ports/esp32
-          # Çakışmaları önlemek için lock dosyasını ve eski buildi temizle
-          rm -f managed_components/espressif__*/*.lock
+          
+          # HATA ÇÖZÜMÜ: Eksik olan touch sensor bileşenini 'sahte' olarak oluşturuyoruz
+          # Bu sefer ports/esp32/components altına koyarak CMake'i ikna ediyoruz
+          mkdir -p components/esp_driver_touch_sens
+          echo 'idf_component_register()' > components/esp_driver_touch_sens/CMakeLists.txt
+          
+          # Eski logları ve build klasörünü tertemiz yapalım
           rm -rf build-ESP32_GENERIC_S3-SPIRAM_OCT
           
-          # Derlemeyi başlat ve tüm çıktıyı (hatalar dahil) log.txt'ye yaz
+          # Derlemeyi başlat
           make BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT \
                USER_C_MODULES=${{ github.workspace }}/my_module/micropython.cmake \
                ESP_IDF_PATH=${{ github.workspace }}/esp-idf > build_log.txt 2>&1 || \
-               (echo "!!! GERÇEK HATA BURADA BAŞLIYOR !!!" && tail -n 100 build_log.txt && exit 1)
+               (echo "!!! HATA TESPİT EDİLDİ !!!" && tail -n 100 build_log.txt && exit 1)
                
       - name: Upload Firmware
         if: success()
