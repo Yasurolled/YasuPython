@@ -23,30 +23,31 @@ jobs:
 
       - name: Setup ESP-IDF
         run: |
-          # ESP-IDF'i bağımsız olarak kur
           git clone --recursive --branch v5.2.2 https://github.com/espressif/esp-idf.git esp-idf
           cd esp-idf
           ./install.sh esp32s3
           
       - name: Build Firmware
         run: |
-          # 1. Ortam Değişkenlerini Tanımla
+          # 1. Ortamı Aktif Et
           cd esp-idf
           source export.sh
           export ESP_IDF_PATH=${{ github.workspace }}/esp-idf
           
-          # 2. MicroPython mpy-cross (derleyici) hazırlığı
+          # 2. MicroPython mpy-cross hazırlığı
           cd ../micropython
           make -C mpy-cross
           
-          # 3. SORUNLU BİLEŞENLERİ ZORLA SİL (Bypass)
-          # IDF 5.2'de olmayan ama MP Master'ın aradığı her şeyi temizle
-          cd ports/esp32
-          find . -name "CMakeLists.txt" -type f -exec sed -i 's/esp_driver_touch_sens//g' {} +
-          find . -name "CMakeLists.txt" -type f -exec sed -i 's/esp_driver_gptimer//g' {} +
+          # 3. LANETLİ BİLEŞENİ MANUEL OLUŞTUR (Kesin Çözüm)
+          # CMake 'esp_driver_touch_sens' aradığında boş bir klasör bulsun diye yapıyoruz
+          mkdir -p ../esp-idf/components/esp_driver_touch_sens
+          echo 'idf_component_register()' > ../esp-idf/components/esp_driver_touch_sens/CMakeLists.txt
           
-          # 4. Derleme (S3-Octal için)
-          # USER_C_MODULES yolunu senin repo yapına göre ayarladık
+          # 4. Derleme
+          cd ports/esp32
+          # Mevcut tüm CMake cache'lerini temizle
+          rm -rf build-ESP32_GENERIC_S3-SPIRAM_OCT
+          
           make BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT \
                USER_C_MODULES=${{ github.workspace }}/my_module/micropython.cmake \
                ESP_IDF_PATH=${{ github.workspace }}/esp-idf
@@ -54,5 +55,5 @@ jobs:
       - name: Upload Firmware
         uses: actions/upload-artifact@v4
         with:
-          name: YasuPython-ESP32S3-N16R8
+          name: YasuPython-ESP32S3-Firmware
           path: micropython/ports/esp32/build-ESP32_GENERIC_S3-SPIRAM_OCT/firmware.bin
