@@ -1,4 +1,4 @@
-name: Build MicroPython WiFi TX
+name: Build YasuPython ESP32S3
 
 on:
   push:
@@ -9,7 +9,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Yasu Module
+      - name: Checkout My Module
         uses: actions/checkout@v4
         with:
           path: my_module
@@ -23,37 +23,49 @@ jobs:
 
       - name: Setup ESP-IDF
         run: |
-          # ESP-IDF v5.2.2 Kurulumu
+          # ESP-IDF v5.2.2 (S3 için en stabil sürüm)
           git clone --recursive --branch v5.2.2 https://github.com/espressif/esp-idf.git esp-idf
           cd esp-idf
           ./install.sh esp32s3
           
       - name: Build Firmware
+        shell: bash
         run: |
-          # 1. IDF Ortamını Aktif Et
+          # 1. Ortam Değişkenlerini Ayarla
           cd esp-idf
           source export.sh
           export ESP_IDF_PATH=${{ github.workspace }}/esp-idf
           
-          # 2. MicroPython mpy-cross derlemesi
+          # 2. MicroPython mpy-cross Hazırla
           cd ../micropython
           make -C mpy-cross
           
-          # 3. SORUNLU BİLEŞENLERİ MANUEL OLUŞTUR (Bypass)
-          # IDF 5.2'de olmayan ama MP Master'ın aradığı her şeyi dummy olarak ekliyoruz
+          # 3. S3 Mimarisinde Eksik Olan Bileşenleri Bypass Et
+          # Bu kısım 'No such file or directory' hatalarını önler
           mkdir -p ../esp-idf/components/esp_driver_touch_sens
           echo 'idf_component_register()' > ../esp-idf/components/esp_driver_touch_sens/CMakeLists.txt
           
-          # 4. Derleme (V=1 ile tam log alıyoruz)
+          # 4. Derleme İşlemi
           cd ports/esp32
-          rm -rf build-ESP32_GENERIC_S3-SPIRAM_OCT
           
-          make V=1 BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT \
+          # Not: Eğer derleme hata verirse 'cat' komutu gizli logları ekrana basar
+          make BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT \
                USER_C_MODULES=${{ github.workspace }}/my_module/micropython.cmake \
-               ESP_IDF_PATH=${{ github.workspace }}/esp-idf
+               ESP_IDF_PATH=${{ github.workspace }}/esp-idf || \
+               (echo "!!! HATA TESPİT EDİLDİ - LOGLAR DÖKÜLÜYOR !!!" && \
+                cat build-ESP32_GENERIC_S3-SPIRAM_OCT/log/idf_py_stderr_output_* && \
+                exit 1)
                
       - name: Upload Firmware
+        if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: YasuPython-ESP32S3-Firmware
+          name: YasuPython-S3-Firmware
           path: micropython/ports/esp32/build-ESP32_GENERIC_S3-SPIRAM_OCT/firmware.bin
+
+      - name: Upload Error Logs on Failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Debug-Logs
+          path: micropython/ports/esp32/build-ESP32_GENERIC_S3-SPIRAM_OCT/log/
