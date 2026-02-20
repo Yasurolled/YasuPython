@@ -23,32 +23,32 @@ jobs:
 
       - name: Setup ESP-IDF
         run: |
+          # ESP-IDF v5.2.2 Kurulumu
           git clone --recursive --branch v5.2.2 https://github.com/espressif/esp-idf.git esp-idf
           cd esp-idf
           ./install.sh esp32s3
           
       - name: Build Firmware
         run: |
-          # 1. Ortamı Aktif Et
+          # 1. IDF Ortamını Aktif Et
           cd esp-idf
           source export.sh
           export ESP_IDF_PATH=${{ github.workspace }}/esp-idf
           
-          # 2. MicroPython mpy-cross hazırlığı
+          # 2. MicroPython mpy-cross derlemesi
           cd ../micropython
           make -C mpy-cross
           
-          # 3. LANETLİ BİLEŞENİ MANUEL OLUŞTUR (Kesin Çözüm)
-          # CMake 'esp_driver_touch_sens' aradığında boş bir klasör bulsun diye yapıyoruz
+          # 3. SORUNLU BİLEŞENLERİ MANUEL OLUŞTUR (Bypass)
+          # IDF 5.2'de olmayan ama MP Master'ın aradığı her şeyi dummy olarak ekliyoruz
           mkdir -p ../esp-idf/components/esp_driver_touch_sens
           echo 'idf_component_register()' > ../esp-idf/components/esp_driver_touch_sens/CMakeLists.txt
           
-          # 4. Derleme
+          # 4. Derleme (V=1 ile tam log alıyoruz)
           cd ports/esp32
-          # Mevcut tüm CMake cache'lerini temizle
           rm -rf build-ESP32_GENERIC_S3-SPIRAM_OCT
           
-          make BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT \
+          make V=1 BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT \
                USER_C_MODULES=${{ github.workspace }}/my_module/micropython.cmake \
                ESP_IDF_PATH=${{ github.workspace }}/esp-idf
                
