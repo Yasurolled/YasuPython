@@ -3,7 +3,7 @@ name: Build MicroPython with ESP WiFi TX Module
 on:
   push:
     branches: [ "master", "main" ]
-  workflow_dispatch: # Manuel başlatma butonu ekler
+  workflow_dispatch:
 
 jobs:
   build:
@@ -12,38 +12,39 @@ jobs:
       - name: Checkout Yasu's Module
         uses: actions/checkout@v4
         with:
-          path: micropython_esp_wifi_tx
+          path: my_module  # Senin repon 'my_module' klasörüne inecek
 
       - name: Checkout MicroPython
         uses: actions/checkout@v4
         with:
           repository: micropython/micropython
-          path: micropython
+          path: micropython # Ana repo 'micropython' klasörüne inecek
           submodules: recursive
 
       - name: Install ESP-IDF
         run: |
-          cd micropython/esp-idf
-          # v1.24+ MicroPython için en stabil sürüm
+          cd micropython/lib/esp-idf  # MicroPython içinde IDF genellikle lib altındadır veya submodule'dur
+          # Eğer üstteki yol hata verirse 'cd micropython/esp-idf' denenebilir (repoya göre değişir)
           git checkout v5.2.2 
           git submodule update --init --recursive
           ./install.sh esp32s3
           
       - name: Build Firmware
         run: |
-          cd micropython/esp-idf
+          # 1. Ortamı hazırla
+          cd micropython/lib/esp-idf
           source export.sh
           
-          # Hatalı dokunmatik sürücüsü kontrolünü bypass et
-          sed -i 's/esp_driver_touch_sens//g' ../ports/esp32/main/CMakeLists.txt
+          # 2. Hatalı bileşeni temizle
+          cd ../../ports/esp32
+          sed -i 's/esp_driver_touch_sens//g' main/CMakeLists.txt
           
-          cd ../ports/esp32
-          # BOARD ve USER_C_MODULES tanımı
+          # 3. Derle (Yollar artik tam path olarak veriliyor)
           make BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT \
-               USER_C_MODULES=${{ github.workspace }}/micropython_esp_wifi_tx/micropython.cmake
+               USER_C_MODULES=${{ github.workspace }}/my_module/micropython.cmake
                
       - name: Upload Firmware Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: YasuPython-S3-N16R8-Firmware
+          name: YasuPython-S3-Firmware
           path: micropython/ports/esp32/build-ESP32_GENERIC_S3-SPIRAM_OCT/firmware.bin
