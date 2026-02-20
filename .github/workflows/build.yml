@@ -12,36 +12,42 @@ jobs:
       - name: Checkout Yasu's Module
         uses: actions/checkout@v4
         with:
-          path: my_module  # Senin repon 'my_module' klasörüne inecek
+          path: my_module
 
       - name: Checkout MicroPython
         uses: actions/checkout@v4
         with:
           repository: micropython/micropython
-          path: micropython # Ana repo 'micropython' klasörüne inecek
-          submodules: recursive
+          path: micropython
+          # Submodule'ları burada çekmiyoruz, manuel kontrol edeceğiz
 
-      - name: Install ESP-IDF
+      - name: Setup ESP-IDF
         run: |
-          cd micropython/lib/esp-idf  # MicroPython içinde IDF genellikle lib altındadır veya submodule'dur
-          # Eğer üstteki yol hata verirse 'cd micropython/esp-idf' denenebilir (repoya göre değişir)
-          git checkout v5.2.2 
-          git submodule update --init --recursive
+          # 1. ESP-IDF'i direkt kaynaktan çek
+          git clone --recursive --branch v5.2.2 https://github.com/espressif/esp-idf.git esp-idf
+          cd esp-idf
           ./install.sh esp32s3
           
       - name: Build Firmware
         run: |
-          # 1. Ortamı hazırla
-          cd micropython/lib/esp-idf
+          # 1. IDF Ortamını Aktif Et
+          cd esp-idf
           source export.sh
+          export ESP_IDF_PATH=$(pwd)
           
-          # 2. Hatalı bileşeni temizle
-          cd ../../ports/esp32
+          # 2. MicroPython alt modüllerini hazırla (mpy-cross için gerekebilir)
+          cd ../micropython
+          make -C mpy-cross
+          
+          # 3. Hatalı dokunmatik bileşeni temizle
+          cd ports/esp32
           sed -i 's/esp_driver_touch_sens//g' main/CMakeLists.txt
           
-          # 3. Derle (Yollar artik tam path olarak veriliyor)
+          # 4. Derleme
+          # IDF_PATH'i dışarıdan tanıtıyoruz ki MicroPython şaşırmasın
           make BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT \
-               USER_C_MODULES=${{ github.workspace }}/my_module/micropython.cmake
+               USER_C_MODULES=${{ github.workspace }}/my_module/micropython.cmake \
+               ESP_IDF_PATH=${{ github.workspace }}/esp-idf
                
       - name: Upload Firmware Artifact
         uses: actions/upload-artifact@v4
