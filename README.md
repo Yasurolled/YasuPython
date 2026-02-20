@@ -1,3 +1,5 @@
+[![Build YasuPython ESP32S3](https://github.com/Yasurolled/YasuPython/actions/workflows/build.yml/badge.svg)](https://github.com/Yasurolled/YasuPython/actions/workflows/build.yml)
+
 # ESP WiFi 802.11 TX Module
 
 Raw 802.11 frame transmission module for MicroPython on ESP32-S3.
