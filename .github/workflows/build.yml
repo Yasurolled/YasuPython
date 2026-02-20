@@ -23,6 +23,7 @@ jobs:
 
       - name: Setup ESP-IDF
         run: |
+          # S3 için en kararlı sürüm v5.2.2
           git clone --recursive --branch v5.2.2 https://github.com/espressif/esp-idf.git esp-idf
           cd esp-idf
           ./install.sh esp32s3
@@ -30,32 +31,36 @@ jobs:
       - name: Build Firmware
         shell: bash
         run: |
+          # 1. Ortam Değişkenlerini Yükle
           cd esp-idf
           source export.sh
           export ESP_IDF_PATH=${{ github.workspace }}/esp-idf
           
+          # 2. mpy-cross Derle
           cd ../micropython
           make -C mpy-cross
           
+          # 3. ESP32 Portuna Git ve Hazırlık Yap
           cd ports/esp32
           
-          # HATA ÇÖZÜMÜ: Eksik olan touch sensor bileşenini 'sahte' olarak oluşturuyoruz
-          # Bu sefer ports/esp32/components altına koyarak CMake'i ikna ediyoruz
+          # [HATA ÇÖZÜMÜ 1] Eksik touch_sens bileşenini kandır
           mkdir -p components/esp_driver_touch_sens
           echo 'idf_component_register()' > components/esp_driver_touch_sens/CMakeLists.txt
           
-          # Eski logları ve build klasörünü tertemiz yapalım
-          rm -rf build-ESP32_GENERIC_S3-SPIRAM_OCT
+          # [HATA ÇÖZÜMÜ 2] C kodundaki hatalı header'ı düzelt
+          # py/objbytes.h artık MicroPython'da standart değil, bunu yorum satırı yapıyoruz
+          sed -i 's/#include "py\/objbytes.h"/\/\/ #include "py\/objbytes.h"/g' ${{ github.workspace }}/my_module/esp_wifi_80211_tx.c
           
-          # Derlemeyi başlat
+          # 4. Derlemeyi Başlat
+          # Hata alırsan son 100 satırı terminale dökecek şekilde ayarlandı
           make BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT \
                USER_C_MODULES=${{ github.workspace }}/my_module/micropython.cmake \
                ESP_IDF_PATH=${{ github.workspace }}/esp-idf > build_log.txt 2>&1 || \
-               (echo "!!! HATA TESPİT EDİLDİ !!!" && tail -n 100 build_log.txt && exit 1)
+               (echo "!!! DERLEME HATASI TESPİT EDİLDİ !!!" && tail -n 100 build_log.txt && exit 1)
                
       - name: Upload Firmware
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: YasuPython-S3-Firmware
-          path: micropython/ports/esp32/build-ESP32_GENERIC_S3-SPIRAM_OCT/firmware.bin
+          name: YasuPython-ESP32S3-Firmware
+          path: micropython/ports/esp32/build-ESP32_GENERIC_S3
