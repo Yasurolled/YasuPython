@@ -1,4 +1,4 @@
-,name: Build YasuPython ESP32S3
+name: Build YasuPython ESP32S3
 
 on:
   push:
