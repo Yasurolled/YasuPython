@@ -32,32 +32,32 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          # 1. Ortam ve SDK Hazırlığı
           cd esp-idf
           source export.sh
           cd ../micropython
           make -C mpy-cross
           cd ports/esp32
           
-          # HINT: esp_driver_touch_sens hatasını engellemek için sdkconfig yaması
-          echo "CONFIG_ESP_DRIVER_TOUCH_SENS_DISABLED=y" >> boards/ESP32_GENERIC_S3/sdkconfig.board
+          # ESP-IDF v5.2+ touch driver yaması (Önceki hatayı çözen kısım)
+          sed -i 's/esp_driver_touch_sens//g' CMakeLists.txt
           
-          # 2. İlk Derleme Denemesi
+          # İlk derleme denemesi
           make BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT \
                USER_C_MODULES=${{ github.workspace }}/main_repo/micropython.cmake \
                ESP_IDF_PATH=${{ github.workspace }}/esp-idf > build_log.txt 2>&1 && OK=true || OK=false
 
-          # 3. Hata Varsa Gemini 1.5 Flash Devreye Girer
           if [ "$OK" = false ]; then
-            echo "!!! HATA ANALIZI BASLIYOR !!!"
+            echo "!!! HATA ANALIZI BASLIYOR (Gemini 3 Flash) !!!"
             
-            printf 'import os, sys\nfrom google import genai\napi_key = os.environ.get("GEMINI_API_KEY")\nclient = genai.Client(api_key=api_key)\ntry:\n    with open("build_log.txt", "r") as f: log = f.read()[-3000:]\n    prompt = f"MicroPython ESP32 build error:\\n{log}\\n\\nFix it with ONLY bash commands."\n    response = client.models.generate_content(model="gemini-1.5-flash", contents=prompt)\n    content = response.text\n    print("AI Response:", content)\n    code = content.split("```bash")[1].split("```")[0] if "```bash" in content else content\n    with open("fix.sh", "w") as f: f.write(code.strip())\nexcept Exception as e: print(f"AI Hata: {e}")' > ai_fix.py
+            # Yeni Google GenAI SDK Standartlarına Uygun Python Scripti
+            printf 'import os, sys\nfrom google import genai\nclient = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))\ntry:\n    with open("build_log.txt", "r") as f: log = f.read()[-4000:]\n    prompt = f"Fix MicroPython ESP32 build error. Output ONLY bash commands to fix it:\\n{log}"\n    response = client.models.generate_content(model="gemini-3-flash-preview", contents=prompt)\n    content = response.text\n    code = content.split("```bash")[1].split("```")[0] if "```bash" in content else content\n    with open("fix.sh", "w") as f: f.write(code.strip())\nexcept Exception as e: print(f"SDK Error: {e}")' > ai_fix.py
 
+            # Yeni SDK Kurulumu
             python3 -m pip install -q -U google-genai
             python3 ai_fix.py
             
             if [ -f fix.sh ] && [ -s fix.sh ]; then
-              echo "!!! AI COZUMU UYGULUYOR !!!"
+              echo "!!! AI YENI SDK ILE COZUM URETTI !!!"
               chmod +x fix.sh
               ./fix.sh
               echo "!!! TEKRAR DERLENIYOR !!!"
@@ -65,7 +65,7 @@ jobs:
                    USER_C_MODULES=${{ github.workspace }}/main_repo/micropython.cmake \
                    ESP_IDF_PATH=${{ github.workspace }}/esp-idf
             else
-              echo "!!! AI COZUM URETEMEDI, LOGLARIN SONU: !!!"
+              echo "!!! KRITIK HATA: LOGLARIN SONU !!!"
               tail -n 100 build_log.txt
               exit 1
             fi
