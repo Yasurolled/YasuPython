@@ -36,66 +36,53 @@ jobs:
           source export.sh
           cd ../micropython/ports/esp32
           
-          # SDK kütüphanesini kur
           python3 -m pip install -q -U google-genai
 
-          # Python scriptini temiz bir şekilde oluştur
-          cat << 'EOF' > ai_analyzer.py
-import os, sys
-from google import genai
-try:
-    client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
-    if not os.path.exists("build_log.txt"):
-        print("Log dosyası henüz oluşmadı.")
-        sys.exit(0)
-    with open("build_log.txt", "r") as f:
-        log_data = f.read()[-4000:]
-    
-    prompt = f"MicroPython ESP32 build error:\n{log_data}\n\nTask: Explain the error briefly and provide the fix in a bash block. You are in micropython/ports/esp32."
-    response = client.models.generate_content(model="gemini-3-flash-preview", contents=prompt)
-    
-    print("\n🤖 GEMINI ANALİZİ:\n", response.text)
-    if "```bash" in response.text:
-        code = response.text.split("```bash")[1].split("```")[0]
-        with open("fix.sh", "w") as f:
-            f.write(code.strip())
-except Exception as e:
-    print(f"Hata oluştu: {e}")
-EOF
+          # Python scriptini bir degiskene atayarak olusturuyoruz (En güvenli yol)
+          PYTHON_SCRIPT=$(cat << 'EOF'
+          import os, sys
+          from google import genai
+          try:
+              client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+              if not os.path.exists("build_log.txt"):
+                  sys.exit(0)
+              with open("build_log.txt", "r") as f:
+                  log_data = f.read()[-4000:]
+              p = f"MicroPython ESP32 build error:\n{log_data}\n\nTask: Fix with bash commands. You are in micropython/ports/esp32."
+              response = client.models.generate_content(model="gemini-3-flash-preview", contents=p)
+              print(f"\n🤖 GEMINI ANALIZI:\n{response.text}")
+              if "```bash" in response.text:
+                  code = response.text.split("```bash")[1].split("```")[0]
+                  with open("fix.sh", "w") as f:
+                      f.write(code.strip())
+          except Exception as e:
+              print(f"Hata: {e}")
+          EOF
+          )
+          echo "$PYTHON_SCRIPT" > ai_analyzer.py
 
           ATTEMPT=1
-          MAX_ATTEMPTS=50
-          
-          while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
-            echo "=========================================="
-            echo "🔄 DENEME: $ATTEMPT"
-            echo "=========================================="
+          while [ $ATTEMPT -le 50 ]; do
+            echo "--- DENEME: $ATTEMPT ---"
             
-            # Derlemeyi dene
             make BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT \
                  USER_C_MODULES=${{ github.workspace }}/main_repo/micropython.cmake \
                  ESP_IDF_PATH=${{ github.workspace }}/esp-idf > build_log.txt 2>&1
             
             if [ $? -eq 0 ]; then
-              echo "✅ BAŞARILI: Firmware hazır!"
+              echo "✅ BAŞARILI!"
               exit 0
             fi
 
-            # Hata varsa Gemini'yi çalıştır
             python3 ai_analyzer.py
 
             if [ -f fix.sh ]; then
-              echo "🛠️ Gemini fix uyguluyor..."
               chmod +x fix.sh
               ./fix.sh || true
               rm fix.sh
             fi
 
-            if [ $((ATTEMPT % 5)) -eq 0 ]; then
-              echo "⏳ Kota doldu, 10 dakika bekleniyor..."
-              sleep 600
-            fi
-
+            [ $((ATTEMPT % 5)) -eq 0 ] && sleep 600
             ATTEMPT=$((ATTEMPT + 1))
           done
 
