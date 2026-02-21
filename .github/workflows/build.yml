@@ -38,7 +38,7 @@ jobs:
           make -C mpy-cross
           cd ports/esp32
           
-          # İlk derleme denemesi
+          # İlk deneme
           make BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT \
                USER_C_MODULES=${{ github.workspace }}/main_repo/micropython.cmake \
                ESP_IDF_PATH=${{ github.workspace }}/esp-idf > build_log.txt 2>&1 && OK=true || OK=false
@@ -46,27 +46,8 @@ jobs:
           if [ "$OK" = false ]; then
             echo "!!! HATA ANALIZI BASLIYOR !!!"
             
-            # Python kodunun girintileri YAML'a göre ayarlandı
-            cat << 'EOF' > ai_fix.py
-import os, google.generativeai as genai, sys
-api_key = os.environ.get("GEMINI_API_KEY")
-if not api_key:
-    sys.exit(1)
-genai.configure(api_key=api_key)
-model = genai.GenerativeModel('gemini-1.5-flash')
-try:
-    with open("build_log.txt", "r") as f:
-        log = f.read()[-3000:]
-    system_context = "ESP32-S3 MicroPython 'esp_wifi_80211_tx.c' modülü hatası düzeltici."
-    prompt = f"{system_context}\n\nLog:\n{log}\n\nSADECE bash komutları yaz."
-    response = model.generate_content(prompt)
-    content = response.text
-    code = content.split("```bash")[1].split("```")[0] if "```bash" in content else content
-    with open("fix.sh", "w") as f:
-        f.write(code.strip())
-except Exception as e:
-    print(e)
-EOF
+            # Python scriptini YAML'ı bozmadan tek satırda veya güvenli blokta yazıyoruz
+            printf 'import os, google.generativeai as genai, sys\napi_key = os.environ.get("GEMINI_API_KEY")\ngenai.configure(api_key=api_key)\nmodel = genai.GenerativeModel("gemini-1.5-flash")\ntry:\n    with open("build_log.txt", "r") as f: log = f.read()[-3000:]\n    prompt = f"MicroPython build error:\\n{log}\\n\\nFix it with ONLY bash commands."\n    response = model.generate_content(prompt)\n    content = response.text\n    code = content.split("```bash")[1].split("```")[0] if "```bash" in content else content\n    with open("fix.sh", "w") as f: f.write(code.strip())\nexcept Exception as e: print(e)' > ai_fix.py
 
             python3 -m pip install -q -U google-generativeai
             python3 ai_fix.py
