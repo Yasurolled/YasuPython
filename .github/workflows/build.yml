@@ -1,33 +1,4 @@
-name: Build YasuPython AI-Fix
-
-on:
-  push:
-    branches: [ "master", "main" ]
-  workflow_dispatch:
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-        with:
-          path: main_repo
-
-      - name: Checkout MicroPython
-        uses: actions/checkout@v4
-        with:
-          repository: micropython/micropython
-          path: micropython
-          submodules: recursive
-
-      - name: Setup ESP-IDF
-        run: |
-          git clone --recursive --branch v5.2.2 https://github.com/espressif/esp-idf.git esp-idf
-          cd esp-idf
-          ./install.sh esp32s3
-          
-      - name: Build and AI Auto-Fix Loop
+- name: Build and AI Auto-Fix Loop
         shell: bash
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -38,55 +9,62 @@ jobs:
           
           python3 -m pip install -q -U google-genai
 
-          # Python scriptini en güvenli şekilde oluşturalım
-          echo 'import os' > ai_analyzer.py
-          echo 'from google import genai' >> ai_analyzer.py
-          echo 'client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))' >> ai_analyzer.py
-          echo 'try:' >> ai_analyzer.py
-          echo '    with open("build_log.txt", "r") as f: log = f.read()[-4000:]' >> ai_analyzer.py
-          echo '    p = "MicroPython build error:\n" + log + "\n\nTask: Fix with bash commands. You are in micropython/ports/esp32."' >> ai_analyzer.py
-          echo '    res = client.models.generate_content(model="gemini-3-flash-preview", contents=p)' >> ai_analyzer.py
-          echo '    print("\n🤖 GEMINI ANALIZI:\n", res.text)' >> ai_analyzer.py
-          echo '    if "```bash" in res.text:' >> ai_analyzer.py
-          echo '        code = res.text.split("```bash")[1].split("```")[0]' >> ai_analyzer.py
-          echo '        with open("fix.sh", "w") as f: f.write(code.strip())' >> ai_analyzer.py
-          echo 'except Exception as e: print(f"Error: {e}")' >> ai_analyzer.py
+          # En temiz Python scripti oluşturma yöntemi
+          cat << 'EOF' > ai_analyzer.py
+import os
+from google import genai
+try:
+    client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+    if not os.path.exists("build_log.txt"):
+        print("Log file not found")
+        sys.exit(0)
+    with open("build_log.txt", "r") as f:
+        log_data = f.read()[-4000:]
+    
+    prompt = f"MicroPython ESP32 build error:\n{log_data}\n\nTask: Explain the error briefly and provide the fix in a bash block. You are in micropython/ports/esp32."
+    response = client.models.generate_content(model="gemini-3-flash-preview", contents=prompt)
+    
+    print("\n🤖 GEMINI ANALIZI:\n", response.text)
+    if "```bash" in response.text:
+        code = response.text.split("```bash")[1].split("```")[0]
+        with open("fix.sh", "w") as f:
+            f.write(code.strip())
+except Exception as e:
+    print(f"Error: {e}")
+EOF
 
           ATTEMPT=1
-          SUCCESS=false
-
-          while [ "$SUCCESS" = false ]; do
+          MAX_ATTEMPTS=50
+          
+          while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
             echo "--- DENEME: $ATTEMPT ---"
             
+            # Derleme komutu
             make BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT \
                  USER_C_MODULES=${{ github.workspace }}/main_repo/micropython.cmake \
                  ESP_IDF_PATH=${{ github.workspace }}/esp-idf > build_log.txt 2>&1
             
             if [ $? -eq 0 ]; then
               echo "✅ SUCCESS!"
-              SUCCESS=true
-            else
-              if [ $((ATTEMPT % 5)) -eq 0 ]; then
-                echo "⏳ Sleeping 10m for quota..."
-                sleep 600
-              fi
-
-              python3 ai_analyzer.py
-
-              if [ -f fix.sh ]; then
-                chmod +x fix.sh
-                ./fix.sh || true
-                rm fix.sh
-              fi
-              ATTEMPT=$((ATTEMPT + 1))
+              exit 0
             fi
-            
-            [ $ATTEMPT -gt 50 ] && exit 1
-          done
 
-      - name: Upload Firmware
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: YasuPython-S3-Firmware
-          path: micropython/ports/esp32/build-ESP32_GENERIC_S3-SPIRAM_OCT/firmware.bin
+            # Hata varsa Gemini'yi çalıştır
+            python3 ai_analyzer.py
+
+            if [ -f fix.sh ]; then
+              echo "🛠️ Uygulanan Fix:"
+              cat fix.sh
+              chmod +x fix.sh
+              ./fix.sh || true
+              rm fix.sh
+            fi
+
+            # Kota Kontrolü
+            if [ $((ATTEMPT % 5)) -eq 0 ]; then
+              echo "⏳ Kota bekletmesi (10dk)..."
+              sleep 600
+            fi
+
+            ATTEMPT=$((ATTEMPT + 1))
+          done
