@@ -44,23 +44,24 @@ jobs:
                ESP_IDF_PATH=${{ github.workspace }}/esp-idf > build_log.txt 2>&1 && OK=true || OK=false
 
           if [ "$OK" = false ]; then
-            echo "!!! HATA ANALIZI BASLIYOR !!!"
+            echo "!!! HATA ANALIZI BASLIYOR (Model: Flash-8B) !!!"
             
-            # Yeni kütüphane ve model ismi ile güncellenmiş Python scripti
-            printf 'import os, sys\nfrom google import genai\napi_key = os.environ.get("GEMINI_API_KEY")\nclient = genai.Client(api_key=api_key)\ntry:\n    with open("build_log.txt", "r") as f: log = f.read()[-3000:]\n    prompt = f"MicroPython build error:\\n{log}\\n\\nFix it with ONLY bash commands."\n    response = client.models.generate_content(model="gemini-2.0-flash", contents=prompt)\n    content = response.text\n    code = content.split("```bash")[1].split("```")[0] if "```bash" in content else content\n    with open("fix.sh", "w") as f: f.write(code.strip())\nexcept Exception as e: print(e)' > ai_fix.py
+            printf 'import os, sys\nfrom google import genai\napi_key = os.environ.get("GEMINI_API_KEY")\nclient = genai.Client(api_key=api_key)\ntry:\n    with open("build_log.txt", "r") as f: log = f.read()[-3000:]\n    prompt = f"MicroPython build error:\\n{log}\\n\\nFix it with ONLY bash commands."\n    response = client.models.generate_content(model="gemini-1.5-flash-8b", contents=prompt)\n    content = response.text\n    print("AI Response:", content)\n    code = content.split("```bash")[1].split("```")[0] if "```bash" in content else content\n    with open("fix.sh", "w") as f: f.write(code.strip())\nexcept Exception as e:\n    print(f"Hata detayi: {e}")\n    sys.exit(0)' > ai_fix.py
 
-            # Yeni kütüphaneyi kuruyoruz
             python3 -m pip install -q -U google-genai
             python3 ai_fix.py
             
-            if [ -f fix.sh ]; then
-              echo "!!! GEMINI COZUMU UYGULUYOR !!!"
+            if [ -f fix.sh ] && [ -s fix.sh ]; then
+              echo "!!! AI COZUMU UYGULUYOR !!!"
               chmod +x fix.sh
               ./fix.sh
               echo "!!! TEKRAR DERLENIYOR !!!"
               make BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT \
                    USER_C_MODULES=${{ github.workspace }}/main_repo/micropython.cmake \
                    ESP_IDF_PATH=${{ github.workspace }}/esp-idf
+            else
+              echo "!!! AI COZUM URETEMEDI, ASIL HATAYI GOSTERIYORUM !!!"
+              tail -n 50 build_log.txt
             fi
           fi
 
