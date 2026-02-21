@@ -1,4 +1,4 @@
-name: Build YasuPython ESP32S3
+name: Build YasuPython Gemini-AI
 
 on:
   push:
@@ -9,10 +9,11 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout My Module
+      - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          path: my_module
+          path: main_repo
+          submodules: recursive
 
       - name: Checkout MicroPython
         uses: actions/checkout@v4
@@ -23,48 +24,60 @@ jobs:
 
       - name: Setup ESP-IDF
         run: |
-          # S3 ve SPIRAM için en stabil sürüm v5.2.2
           git clone --recursive --branch v5.2.2 https://github.com/espressif/esp-idf.git esp-idf
           cd esp-idf
           ./install.sh esp32s3
           
-      - name: Build Firmware
+      - name: Build and AI Auto-Fix
         shell: bash
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          # 1. ESP-IDF Ortamını Yükle
+          # 1. Hazırlıklar
           cd esp-idf
           source export.sh
-          export ESP_IDF_PATH=${{ github.workspace }}/esp-idf
-          
-          # 2. MicroPython Cross-Compiler Hazırla
           cd ../micropython
           make -C mpy-cross
-          
-          # 3. ESP32 Portuna Git
           cd ports/esp32
           
-          # [DÜZELTME] Eksik touch_sens kütüphanesini sahte olarak oluştur (v5.2.2 uyumu için)
-          mkdir -p components/esp_driver_touch_sens
-          echo 'idf_component_register()' > components/esp_driver_touch_sens/CMakeLists.txt
-          
-          # [DÜZELTME] Senin C kodundaki "objbytes.h" hatasını otomatik düzelt
-          # Bu dosya yeni sürümlerde yok, silinmesi derlemeyi kurtarır
-          find ${{ github.workspace }}/my_module -name "*.c" -exec sed -i 's/#include "py\/objbytes.h"/\/\/ #include "py\/objbytes.h"/g' {} +
-          
-          # [DÜZELTME] TinyUSB ve Lock dosyası çakışmalarını temizle
-          rm -rf build-ESP32_GENERIC_S3-SPIRAM_OCT
-          mkdir -p managed_components
-          
-          # 4. Asıl Derleme Komutu
-          # Hata verirse terminale son 150 satırı basar (Hatanın tam yerini görmek için)
+          # 2. İlk Derleme Denemesi
           make BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT \
-               USER_C_MODULES=${{ github.workspace }}/my_module/micropython.cmake \
-               ESP_IDF_PATH=${{ github.workspace }}/esp-idf > build_log.txt 2>&1 || \
-               (echo "!!! KRİTİK HATA: LOGLAR DÖKÜLÜYOR !!!" && tail -n 150 build_log.txt && exit 1)
-               
+               USER_C_MODULES=${{ github.workspace }}/main_repo/micropython.cmake \
+               ESP_IDF_PATH=${{ github.workspace }}/esp-idf > build_log.txt 2>&1 && OK=true || OK=false
+
+          # 3. Eğer Hata Varsa Gemini Devreye Girsin
+          if [ "$OK" = false ]; then
+            echo "!!! HATA ALINDI, GEMINI ANALIZ EDIYOR !!!"
+            
+            # Gemini'ye sormak için Python scriptini oluştur
+            cat << 'EOF' > ai_fix.py
+            import os, google.generativeai as genai
+            genai.configure(api_key=os.environ["GEMINI_API_KEY"])
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            with open("build_log.txt", "r") as f: log = f.read()[-3000:]
+            prompt = f"MicroPython ESP32 build error log:\n{log}\n\nFix this by providing ONLY a bash script starting with #!/bin/bash. Use sed or echo to fix files."
+            response = model.generate_content(prompt)
+            # Yanıtın içindeki bash kodunu ayıkla
+            code = response.text.split('```bash')[-1].split('```')[0] if '```' in response.text else response.text
+            with open("fix.sh", "w") as f: f.write(code.strip())
+            EOF
+
+            python3 -m pip install -q -U google-generativeai
+            python3 ai_fix.py
+            
+            echo "!!! GEMINI COZUMU UYGULUYOR !!!"
+            chmod +x fix.sh
+            ./fix.sh
+            
+            echo "!!! TEKRAR DERLENIYOR !!!"
+            make BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT \
+                 USER_C_MODULES=${{ github.workspace }}/main_repo/micropython.cmake \
+                 ESP_IDF_PATH=${{ github.workspace }}/esp-idf
+          fi
+
       - name: Upload Firmware
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: YasuPython-ESP32S3-Firmware
+          name: YasuPython-S3-Firmware
           path: micropython/ports/esp32/build-ESP32_GENERIC_S3-SPIRAM_OCT/firmware.bin
