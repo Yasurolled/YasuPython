@@ -36,8 +36,33 @@ jobs:
           source export.sh
           cd ../micropython/ports/esp32
           
-          # SDK kütüphanesini kur
           python3 -m pip install -q -U google-genai
+
+          # Python scriptini bir dosyaya yazalım (Syntax hatasını önlemek için)
+          cat << 'EOF' > ai_analyzer.py
+import os, sys
+from google import genai
+try:
+    client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+    with open("build_log.txt", "r") as f:
+        log = f.read()[-4000:]
+    
+    prompt = f"MicroPython ESP32 build error:\n{log}\n\nTask: Explain the error briefly and provide the fix in a bash block. You are in micropython/ports/esp32."
+    
+    response = client.models.generate_content(model="gemini-3-flash-preview", contents=prompt)
+    full_text = response.text
+    
+    print("\n🤖 GEMINI ANALİZİ VE ÖNERİSİ:\n")
+    print(full_text)
+    print("\n------------------------------------------")
+
+    if "```bash" in full_text:
+        code = full_text.split("```bash")[1].split("```")[0]
+        with open("fix.sh", "w") as f:
+            f.write(code.strip())
+except Exception as e:
+    print(f"❌ AI Script Hatası: {e}")
+EOF
 
           ATTEMPT=1
           SUCCESS=false
@@ -62,31 +87,7 @@ jobs:
 
               echo "❌ HATA SAPTANDI. Gemini süreci analiz ediyor..."
               
-              # YAML dostu Python bloğu (Hata payı sıfır)
-              python3 - <<'EOF'
-import os
-from google import genai
-try:
-    client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
-    with open("build_log.txt", "r") as f:
-        log = f.read()[-4000:]
-    
-    prompt = f"MicroPython ESP32 build error:\n{log}\n\nTask: Explain the error briefly and provide the fix in a bash block. You are in micropython/ports/esp32."
-    
-    response = client.models.generate_content(model="gemini-3-flash-preview", contents=prompt)
-    full_text = response.text
-    
-    print("\n🤖 GEMINI ANALİZİ VE ÖNERİSİ:\n")
-    print(full_text)
-    print("\n------------------------------------------")
-
-    if "```bash" in full_text:
-        code = full_text.split("```bash")[1].split("```")[0]
-        with open("fix.sh", "w") as f:
-            f.write(code.strip())
-except Exception as e:
-    print(f"❌ AI Script Hatası: {e}")
-EOF
+              python3 ai_analyzer.py
 
               if [ -f fix.sh ]; then
                 echo "🛠️ AI KOMUTLARI UYGULANIYOR..."
