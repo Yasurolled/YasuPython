@@ -1,79 +1,76 @@
-name: Build YasuPython Gemini-AI
-
-on:
-  push:
-    branches: [ "master", "main" ]
-  workflow_dispatch:
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-        with:
-          path: main_repo
-
-      - name: Checkout MicroPython
-        uses: actions/checkout@v4
-        with:
-          repository: micropython/micropython
-          path: micropython
-          submodules: recursive
-
-      - name: Setup ESP-IDF
-        run: |
-          git clone --recursive --branch v5.2.2 https://github.com/espressif/esp-idf.git esp-idf
-          cd esp-idf
-          ./install.sh esp32s3
-          
-      - name: Build and AI Auto-Fix
+- name: Build and AI Auto-Fix Loop
         shell: bash
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           cd esp-idf
           source export.sh
-          cd ../micropython
-          make -C mpy-cross
-          cd ports/esp32
+          cd ../micropython/ports/esp32
           
-          # ESP-IDF v5.2+ touch driver yaması (Önceki hatayı çözen kısım)
-          sed -i 's/esp_driver_touch_sens//g' CMakeLists.txt
-          
-          # İlk derleme denemesi
-          make BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT \
-               USER_C_MODULES=${{ github.workspace }}/main_repo/micropython.cmake \
-               ESP_IDF_PATH=${{ github.workspace }}/esp-idf > build_log.txt 2>&1 && OK=true || OK=false
+          ATTEMPT=1
+          SUCCESS=false
 
-          if [ "$OK" = false ]; then
-            echo "!!! HATA ANALIZI BASLIYOR (Gemini 3 Flash) !!!"
+          while [ "$SUCCESS" = false ]; do
+            echo "=========================================="
+            echo "🔄 DENEME NO: $ATTEMPT"
+            echo "=========================================="
             
-            # Yeni Google GenAI SDK Standartlarına Uygun Python Scripti
-            printf 'import os, sys\nfrom google import genai\nclient = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))\ntry:\n    with open("build_log.txt", "r") as f: log = f.read()[-4000:]\n    prompt = f"Fix MicroPython ESP32 build error. Output ONLY bash commands to fix it:\\n{log}"\n    response = client.models.generate_content(model="gemini-3-flash-preview", contents=prompt)\n    content = response.text\n    code = content.split("```bash")[1].split("```")[0] if "```bash" in content else content\n    with open("fix.sh", "w") as f: f.write(code.strip())\nexcept Exception as e: print(f"SDK Error: {e}")' > ai_fix.py
-
-            # Yeni SDK Kurulumu
-            python3 -m pip install -q -U google-genai
-            python3 ai_fix.py
+            # Derlemeyi başlat
+            make BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT \
+                 USER_C_MODULES=${{ github.workspace }}/main_repo/micropython.cmake \
+                 ESP_IDF_PATH=${{ github.workspace }}/esp-idf > build_log.txt 2>&1
             
-            if [ -f fix.sh ] && [ -s fix.sh ]; then
-              echo "!!! AI YENI SDK ILE COZUM URETTI !!!"
-              chmod +x fix.sh
-              ./fix.sh
-              echo "!!! TEKRAR DERLENIYOR !!!"
-              make BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT \
-                   USER_C_MODULES=${{ github.workspace }}/main_repo/micropython.cmake \
-                   ESP_IDF_PATH=${{ github.workspace }}/esp-idf
+            if [ $? -eq 0 ]; then
+              echo "✅ BAŞARILI: Firmware oluşturuldu!"
+              SUCCESS=true
             else
-              echo "!!! KRITIK HATA: LOGLARIN SONU !!!"
-              tail -n 100 build_log.txt
-              exit 1
-            fi
-          fi
+              if [ $((ATTEMPT % 5)) -eq 0 ]; then
+                echo "⏳ KOTA LİMİTİ: 10 dakika mola veriliyor..."
+                sleep 600
+              fi
 
-      - name: Upload Firmware
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: YasuPython-S3-Firmware
-          path: micropython/ports/esp32/build-ESP32_GENERIC_S3-SPIRAM_OCT/firmware.bin
+              echo "❌ HATA SAPTANDI. Gemini süreci analiz ediyor..."
+              
+              python3 - <<EOF
+import os
+from google import genai
+client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+try:
+    with open("build_log.txt", "r") as f:
+        log = f.read()[-4000:]
+    
+    # AI'ya hem analizi hem komutları istiyoruz
+    prompt = f"MicroPython ESP32 build error (Attempt $ATTEMPT):\\n{log}\\n\\nTask: Explain the error briefly and provide the fix in a bash block. You are in micropython/ports/esp32."
+    
+    response = client.models.generate_content(model="gemini-3-flash-preview", contents=prompt)
+    
+    full_text = response.text
+    print("\n🤖 GEMINI ANALİZİ VE ÖNERİSİ:\n")
+    print(full_text) # Tüm düşünce sürecini terminale basar
+    print("\n------------------------------------------")
+
+    # Bash bloklarını ayıkla ve fix.sh dosyasına yaz
+    if "\`\`\`bash" in full_text:
+        code = full_text.split("\`\`\`bash")[1].split("\`\`\`")[0]
+        with open("fix.sh", "w") as f:
+            f.write(code.strip())
+    else:
+        print("⚠️ Uyarı: Gemini bash bloğu üretmedi, sadece açıklama yaptı.")
+except Exception as e:
+    print(f"❌ SDK/API Hatası: {e}")
+EOF
+
+              if [ -f fix.sh ]; then
+                echo "🛠️ AI KOMUTLARI UYGULANIYOR..."
+                chmod +x fix.sh
+                ./fix.sh || true
+                rm fix.sh
+              fi
+              ATTEMPT=$((ATTEMPT + 1))
+            fi
+            
+            if [ $ATTEMPT -gt 50 ]; then
+               echo "🛑 KRİTİK: 50 denemede çözüm bulunamadı."
+               exit 1
+            fi
+          done
