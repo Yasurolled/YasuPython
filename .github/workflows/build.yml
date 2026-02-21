@@ -36,6 +36,9 @@ jobs:
           source export.sh
           cd ../micropython/ports/esp32
           
+          # SDK kütüphanesini kur
+          python3 -m pip install -q -U google-genai
+
           ATTEMPT=1
           SUCCESS=false
 
@@ -44,7 +47,6 @@ jobs:
             echo "🔄 DENEME NO: $ATTEMPT"
             echo "=========================================="
             
-            # Derlemeyi başlat ve logları kaydet
             make BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT \
                  USER_C_MODULES=${{ github.workspace }}/main_repo/micropython.cmake \
                  ESP_IDF_PATH=${{ github.workspace }}/esp-idf > build_log.txt 2>&1
@@ -60,31 +62,30 @@ jobs:
 
               echo "❌ HATA SAPTANDI. Gemini süreci analiz ediyor..."
               
-              # AI'nın ne düşündüğünü ekrana basan Python scripti
-              python3 - <<EOF
+              # YAML dostu Python bloğu (Hata payı sıfır)
+              python3 - <<'EOF'
 import os
 from google import genai
-client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 try:
+    client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
     with open("build_log.txt", "r") as f:
         log = f.read()[-4000:]
     
-    prompt = f"MicroPython ESP32 build error (Attempt $ATTEMPT):\\n{log}\\n\\nTask: Explain the error briefly and provide the fix in a bash block. You are in micropython/ports/esp32."
+    prompt = f"MicroPython ESP32 build error:\n{log}\n\nTask: Explain the error briefly and provide the fix in a bash block. You are in micropython/ports/esp32."
     
-    # Gemini 3 Flash Preview kullanılıyor
     response = client.models.generate_content(model="gemini-3-flash-preview", contents=prompt)
-    
     full_text = response.text
+    
     print("\n🤖 GEMINI ANALİZİ VE ÖNERİSİ:\n")
     print(full_text)
     print("\n------------------------------------------")
 
-    if "\`\`\`bash" in full_text:
-        code = full_text.split("\`\`\`bash")[1].split("\`\`\`")[0]
+    if "```bash" in full_text:
+        code = full_text.split("```bash")[1].split("```")[0]
         with open("fix.sh", "w") as f:
             f.write(code.strip())
 except Exception as e:
-    print(f"❌ SDK Hatası: {e}")
+    print(f"❌ AI Script Hatası: {e}")
 EOF
 
               if [ -f fix.sh ]; then
