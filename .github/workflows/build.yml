@@ -13,7 +13,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: main_repo
-          submodules: recursive
 
       - name: Checkout MicroPython
         uses: actions/checkout@v4
@@ -33,7 +32,7 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          # 1. Hazırlıklar
+          # 1. Ortam Hazırlığı
           cd esp-idf
           source export.sh
           cd ../micropython
@@ -41,38 +40,67 @@ jobs:
           cd ports/esp32
           
           # 2. İlk Derleme Denemesi
+          # Çıktıları build_log.txt dosyasına kaydediyoruz
           make BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT \
                USER_C_MODULES=${{ github.workspace }}/main_repo/micropython.cmake \
                ESP_IDF_PATH=${{ github.workspace }}/esp-idf > build_log.txt 2>&1 && OK=true || OK=false
 
-          # 3. Eğer Hata Varsa Gemini Devreye Girsin
+          # 3. Hata Varsa Gemini'ye Sor ve Düzelt
           if [ "$OK" = false ]; then
-            echo "!!! HATA ALINDI, GEMINI ANALIZ EDIYOR !!!"
+            echo "!!! DERLEME HATASI: GEMINI ANALIZI BASLIYOR !!!"
             
-            # Gemini'ye sormak için Python scriptini oluştur
             cat << 'EOF' > ai_fix.py
             import os, google.generativeai as genai
             genai.configure(api_key=os.environ["GEMINI_API_KEY"])
             model = genai.GenerativeModel('gemini-1.5-flash')
-            with open("build_log.txt", "r") as f: log = f.read()[-3000:]
-            prompt = f"MicroPython ESP32 build error log:\n{log}\n\nFix this by providing ONLY a bash script starting with #!/bin/bash. Use sed or echo to fix files."
-            response = model.generate_content(prompt)
-            # Yanıtın içindeki bash kodunu ayıkla
-            code = response.text.split('```bash')[-1].split('```')[0] if '```' in response.text else response.text
-            with open("fix.sh", "w") as f: f.write(code.strip())
+            
+            with open("build_log.txt", "r") as f: 
+                log = f.read()[-3000:] # Son 3000 karakter hatayı anlamak için yeterli
+            
+            # Yasu, burada sadece modülüne odaklanıyoruz
+            system_context = """
+            Sen Yasu'nun teknik asistanısın. 
+            Görev: ESP32-S3 mimarisi için MicroPython firmware derliyoruz.
+            Eklenen Özel Modül: 'esp_wifi_80211_tx.c' (Ham 802.11 paket gönderimi için).
+            Hata gelirse, özellikle bu C dosyasındaki eksik headerları, syntax hatalarını veya 
+            MicroPython v1.22+ ile ESP-IDF v5.2.2 arasındaki uyumsuzlukları düzelt.
+            """
+            
+            prompt = f"{system_context}\n\nDerleme hatası logu:\n{log}\n\nÇözüm için SADECE bash komutları (sed, mkdir, echo vb.) içeren bir script yaz. Kod bloğu içinde ver."
+            
+            try:
+                response = model.generate_content(prompt)
+                # Bash kodunu ayıkla
+                if "```bash" in response.text:
+                    code = response.text.split('```bash')[-1].split('```')[0]
+                elif "```" in response.text:
+                    code = response.text.split('```')[-1].split('```')[0]
+                else:
+                    code = response.text
+                
+                with open("fix.sh", "w") as f: 
+                    f.write(code.strip())
+            except Exception as e:
+                print(f"Gemini API Hatası: {e}")
             EOF
 
             python3 -m pip install -q -U google-generativeai
             python3 ai_fix.py
             
-            echo "!!! GEMINI COZUMU UYGULUYOR !!!"
-            chmod +x fix.sh
-            ./fix.sh
-            
-            echo "!!! TEKRAR DERLENIYOR !!!"
-            make BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT \
-                 USER_C_MODULES=${{ github.workspace }}/main_repo/micropython.cmake \
-                 ESP_IDF_PATH=${{ github.workspace }}/esp-idf
+            if [ -f fix.sh ]; then
+              echo "!!! GEMINI COZUMU UYGULUYOR !!!"
+              chmod +x fix.sh
+              ./fix.sh
+              
+              echo "!!! TEKRAR DERLENIYOR (2. DENEME) !!!"
+              make BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT \
+                   USER_C_MODULES=${{ github.workspace }}/main_repo/micropython.cmake \
+                   ESP_IDF_PATH=${{ github.workspace }}/esp-idf
+            else
+              echo "!!! GEMINI COZUM URETEMEDI, LOGLARI KONTROL ET !!!"
+              tail -n 100 build_log.txt
+              exit 1
+            fi
           fi
 
       - name: Upload Firmware
