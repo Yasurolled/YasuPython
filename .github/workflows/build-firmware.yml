@@ -46,7 +46,8 @@ jobs:
 
       - name: Validate Markdown
         run: |
-          pip install markdownlint-cli2
+          sudo apt-get update && sudo apt-get install -y npm
+          npm install -g markdownlint-cli
           markdownlint README.md FUNCTIONS.md || true
 
   build:
