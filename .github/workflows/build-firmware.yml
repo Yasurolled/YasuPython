@@ -103,14 +103,19 @@ jobs:
       - name: Clone MicroPython repository
         run: |
           if [ ! -d "micropython" ]; then
-            git clone --depth 1 --branch v1.22.2 https://github.com/micropython/micropython.git
+            git clone --branch v1.22.2 https://github.com/micropython/micropython.git
           fi
 
       - name: Clone ESP-IDF repository
         run: |
           if [ ! -d "esp-idf" ]; then
-            git clone --depth 1 --branch v5.5.1 https://github.com/espressif/esp-idf.git
+            git clone --branch v5.5.1 https://github.com/espressif/esp-idf.git
           fi
+          cd esp-idf && git submodule update --init --recursive && cd ..
+
+      - name: Clean build directory
+        run: |
+          rm -rf micropython/ports/esp32/build-ESP32_GENERIC_S3-SPIRAM_OCT || true
 
       - name: Verify user_c_modules directory
         run: |
