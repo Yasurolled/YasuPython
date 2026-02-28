@@ -46,8 +46,8 @@ jobs:
 
       - name: Validate Markdown
         run: |
-          pip install mdl markdownlint-cli2
-          mdl README.md FUNCTIONS.md || true
+          pip install markdownlint-cli2
+          markdownlint README.md FUNCTIONS.md || true
 
   build:
     runs-on: ubuntu-latest
