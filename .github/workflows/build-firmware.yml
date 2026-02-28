@@ -95,7 +95,7 @@ jobs:
 
       - name: Upload firmware artifacts
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: firmware-artifacts
           path: |
@@ -107,7 +107,7 @@ jobs:
 
       - name: Upload build log
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: build-log
           path: build_output.log
@@ -170,3 +170,4 @@ jobs:
           echo "**Board:** ESP32_GENERIC_S3-SPIRAM_OCT" >> $GITHUB_STEP_SUMMARY
           echo "**MicroPython:** v1.22.2" >> $GITHUB_STEP_SUMMARY
           echo "**ESP-IDF:** v5.5.1" >> $GITHUB_STEP_SUMMARY
+
