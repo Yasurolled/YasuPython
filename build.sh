@@ -1,52 +1,54 @@
 #!/bin/bash
-
-# build.sh - build MicroPython firmware with wifi_pro user C module
-# run from the workspace root (/workspaces/Github-Codespace)
-# ensures ESP-IDF v5.5.1 is installed, builds mpy-cross, then compiles
-# the ESP32-S3+OPI firmware with the custom user module.
-
+# YasuPython - Dizin içi Otomatik Derleme Scripti (N16R8 Fix)
 set -euxo pipefail
 
+# Çalışılan ana dizini belirle
 TOP=$(pwd)
 IDF_DIR="$TOP/esp-idf"
+MPY_DIR="$TOP/micropython"
 
-# install host dependencies that ESP-IDF tools require
-# update package lists; some repos may be misconfigured so ignore errors
+# 1. Bağımlılıklar (Codespaces için gerekli)
 sudo apt-get update || true
-sudo apt-get install -y libusb-1.0-0-dev || true
+sudo apt-get install -y libusb-1.0-0-dev cmake ninja-build python3-pip git build-essential || true
 
-# clone/prepare ESP-IDF if missing
+# 2. ESP-IDF Kurulumu (Eğer dizinde yoksa çeker)
 if [ ! -d "$IDF_DIR" ]; then
-    echo "Cloning ESP-IDF v5.5.1 into $IDF_DIR"
+    echo "[!] ESP-IDF bulunamadı, indiriliyor..."
     git clone -b v5.5.1 --recursive https://github.com/espressif/esp-idf.git "$IDF_DIR"
 fi
 
 cd "$IDF_DIR"
-
-git fetch --tags origin
-git checkout v5.5.1
-git submodule update --init --recursive
-
-# install the toolchain and python requirements (idempotent)
 ./install.sh esp32s3
 source export.sh
 
-# build the cross compiler used for freezing
-cd "$TOP/micropython/mpy-cross"
+# 3. MicroPython Kaynak Kodu Kontrolü (Aynı dizinde arar)
+cd "$TOP"
+if [ ! -d "$MPY_DIR" ]; then
+    echo "[!] MicroPython klasörü bulunamadı! Lütfen git clone ile çekin veya scriptin çekmesine izin verin."
+    git clone https://github.com/micropython/micropython.git "$MPY_DIR"
+    cd "$MPY_DIR"
+    git submodule update --init
+else
+    echo "[+] MicroPython dizini doğrulandı: $MPY_DIR"
+fi
+
+# 4. Cross Compiler (mpy-cross) Derleme
+cd "$MPY_DIR/mpy-cross"
 make -j$(nproc)
 
-# now build the firmware
-cd "$TOP/micropython/ports/esp32"
-
-# ensure submodules are present (network drivers, etc.)
+# 5. ESP32 Portu ve Modül Enjeksiyonu
+cd "$MPY_DIR/ports/esp32"
 make submodules
+rm -rf build-ESP32_GENERIC_S3-SPIRAM_OCT
 
+# 6. Derleme Komutu (8MB Octal RAM & wifi_pro Modülü)
+# USER_C_MODULES artık senin ana dizinindeki user_c_modules'e bakar
 make BOARD=ESP32_GENERIC_S3 \
      BOARD_VARIANT=SPIRAM_OCT \
-     USER_C_MODULES=$TOP/user_c_modules/wifi_pro/micropython.cmake \
-     CFLAGS+=-DCONFIG_SPIRAM_MODE_OCT \
-     -j$(nproc) V=1
+     USER_C_MODULES="$TOP/user_c_modules/wifi_pro" \
+     -j$(nproc)
 
-# final binary resides in build-ESP32_GENERIC_S3-SPIRAM_OCT/firmware.bin
-
-echo "Build finished. firmware location:" $(pwd)/build-ESP32_GENERIC_S3-SPIRAM_OCT/firmware.bin
+echo "-------------------------------------------------------"
+echo "İŞLEM TAMAM YASU!"
+echo "Firmware Konumu: $MPY_DIR/ports/esp32/build-ESP32_GENERIC_S3-SPIRAM_OCT/firmware.bin"
+echo "-------------------------------------------------------"
