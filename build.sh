@@ -1,54 +1,47 @@
 #!/bin/bash
-# YasuPython - Dizin içi Otomatik Derleme Scripti (N16R8 Fix)
-set -euxo pipefail
+# YasuPython - Full Auto Build Script for GitHub Actions
+set -e
 
-# Çalışılan ana dizini belirle
-TOP=$(pwd)
-IDF_DIR="$TOP/esp-idf"
-MPY_DIR="$TOP/micropython"
+# 1. Install Dependencies (For Ubuntu Runner)
+sudo apt-get update
+sudo apt-get install -y git wget flex bison gperf python3 python3-pip python3-setuptools cmake ninja-build ccache libffi-dev libssl-dev dfu-util libusb-1.0-0
 
-# 1. Bağımlılıklar (Codespaces için gerekli)
-sudo apt-get update || true
-sudo apt-get install -y libusb-1.0-0-dev cmake ninja-build python3-pip git build-essential || true
-
-# 2. ESP-IDF Kurulumu (Eğer dizinde yoksa çeker)
-if [ ! -d "$IDF_DIR" ]; then
-    echo "[!] ESP-IDF bulunamadı, indiriliyor..."
-    git clone -b v5.5.1 --recursive https://github.com/espressif/esp-idf.git "$IDF_DIR"
-fi
-
-cd "$IDF_DIR"
-./install.sh esp32s3
-source export.sh
-
-# 3. MicroPython Kaynak Kodu Kontrolü (Aynı dizinde arar)
-cd "$TOP"
-if [ ! -d "$MPY_DIR" ]; then
-    echo "[!] MicroPython klasörü bulunamadı! Lütfen git clone ile çekin veya scriptin çekmesine izin verin."
-    git clone https://github.com/micropython/micropython.git "$MPY_DIR"
-    cd "$MPY_DIR"
-    git submodule update --init
+# 2. Setup ESP-IDF (v5.0.2 Stable)
+if [ ! -d "esp-idf" ]; then
+    git clone --recursive -b v5.0.2 https://github.com/espressif/esp-idf.git
+    cd esp-idf
+    ./install.sh esp32s3
+    source export.sh
+    cd ..
 else
-    echo "[+] MicroPython dizini doğrulandı: $MPY_DIR"
+    cd esp-idf
+    source export.sh
+    cd ..
 fi
 
-# 4. Cross Compiler (mpy-cross) Derleme
-cd "$MPY_DIR/mpy-cross"
-make -j$(nproc)
+# 3. Setup MicroPython
+if [ ! -d "micropython" ]; then
+    git clone --recursive https://github.com/micropython/micropython.git
+    cd micropython
+    make -C mpy-cross
+    cd ..
+fi
 
-# 5. ESP32 Portu ve Modül Enjeksiyonu
-cd "$MPY_DIR/ports/esp32"
-make submodules
-rm -rf build-ESP32_GENERIC_S3-SPIRAM_OCT
+# 4. Inject Octal RAM (N16R8) Config
+BOARD_DIR="micropython/ports/esp32/boards/ESP32_GENERIC_S3"
+mkdir -p $BOARD_DIR
+cat > "$BOARD_DIR/sdkconfig.board" <<EOF
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_TYPE_ESP32S3=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_ESPTOOLPY_FLASHMODE_OPI=y
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_SPIRAM_FETCH_INSTRUCTIONS=y
+CONFIG_SPIRAM_RODATA=y
+EOF
 
-# 6. Derleme Komutu (8MB Octal RAM & wifi_pro Modülü)
-# USER_C_MODULES artık senin ana dizinindeki user_c_modules'e bakar
-make BOARD=ESP32_GENERIC_S3 \
-     BOARD_VARIANT=SPIRAM_OCT \
-     USER_C_MODULES="$TOP/user_c_modules/wifi_pro" \
-     -j$(nproc)
+# 5. Build Process (Including WiFi Pro Module)
+cd micropython/ports/esp32
+make BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT USER_C_MODULES=../../../user_c_modules/wifi_pro -j$(nproc)
 
-echo "-------------------------------------------------------"
-echo "İŞLEM TAMAM YASU!"
-echo "Firmware Konumu: $MPY_DIR/ports/esp32/build-ESP32_GENERIC_S3-SPIRAM_OCT/firmware.bin"
-echo "-------------------------------------------------------"
+echo "FIRMWARE READY: micropython/ports/esp32/build-ESP32_GENERIC_S3-SPIRAM_OCT/firmware.bin"
