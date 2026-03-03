@@ -2,7 +2,7 @@
 # YasuPython - Full Auto Build Script for GitHub Actions
 set -e
 
-# 1. Install Dependencies (For Ubuntu Runner)
+# 1. Install System Dependencies
 sudo apt-get update
 sudo apt-get install -y git wget flex bison gperf python3 python3-pip python3-setuptools cmake ninja-build ccache libffi-dev libssl-dev dfu-util libusb-1.0-0
 
@@ -11,7 +11,11 @@ if [ ! -d "esp-idf" ]; then
     git clone --recursive -b v5.0.2 https://github.com/espressif/esp-idf.git
     cd esp-idf
     ./install.sh esp32s3
+    
+    # FIX: Ensure setuptools/pkg_resources is available in the IDF env
+    ./tools/idf_tools.py install-python-env
     source export.sh
+    pip install --upgrade setuptools pip
     cd ..
 else
     cd esp-idf
@@ -40,8 +44,10 @@ CONFIG_SPIRAM_FETCH_INSTRUCTIONS=y
 CONFIG_SPIRAM_RODATA=y
 EOF
 
-# 5. Build Process (Including WiFi Pro Module)
+# 5. Build Process
 cd micropython/ports/esp32
+# Making sure we are using the IDF exported environment
+source ../../esp-idf/export.sh
 make BOARD=ESP32_GENERIC_S3 BOARD_VARIANT=SPIRAM_OCT USER_C_MODULES=../../../user_c_modules/wifi_pro -j$(nproc)
 
 echo "FIRMWARE READY: micropython/ports/esp32/build-ESP32_GENERIC_S3-SPIRAM_OCT/firmware.bin"
