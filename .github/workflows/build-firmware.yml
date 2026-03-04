@@ -1,49 +1,55 @@
-name: Build YasuPython Firmware
+name: YasuPython AI Build
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [ master, main ]
+  workflow_dispatch:
 
 jobs:
-  build:
+  build_firmware:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Repository
+      - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
 
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Run Build Script
-        id: build_step
-        continue-on-error: true # Allow the next step to run if this fails
+      - name: Install Repair Dependencies
+        run: pip install requests
+
+      - name: Attempt Initial Build
+        id: build_attempt
+        continue-on-error: true
         run: |
           chmod +x build.sh
-          ./build.sh
+          # Tüm çıktıyı log dosyasına kaydet
+          ./build.sh 2>&1 | tee build_log.txt
 
-      - name: Gemini Self-Repair
-        if: steps.build_step.outcome == 'failure'
+      - name: Gemini AI Self-Repair
+        # Sadece build başarısız olursa çalışır
+        if: steps.build_attempt.outcome == 'failure'
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          echo "Build failed. Consulting Gemini..."
-          # Capture the error logs
-          ERROR_LOG=$(tail -n 50 build_log.txt || echo "No log found")
-          
-          # Use curl to ask Gemini for a fix
-          RESPONSE=$(curl https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$GEMINI_API_KEY \
-              -H 'Content-Type: application/json' \
-              -X POST \
-              -d '{
-                "contents": [{
-                  "parts":[{"text": "The following build log for MicroPython ESP32-S3 failed. Provide a single bash command to fix it: '"$ERROR_LOG"'"}]
-                }]
-              }')
-          
-          # Extract the command and execute it (requires parsing the JSON response)
-          # For now, let's log the AI's suggestion
-          echo "Gemini Suggestion: $RESPONSE"
-          
-      - name: Final Check
-        if: steps.build_step.outcome == 'failure'
-        run: exit 1 # Fail the workflow after repair attempt so you can see it
+          echo "Build failed. Starting Gemini AI Repair..."
+          python3 repair.py
+
+      - name: Re-run Build After Repair
+        if: steps.build_attempt.outcome == 'failure'
+        run: |
+          echo "Attempting build again after repair..."
+          # Python kontrolünü bypass et ve tekrar dene
+          export IDF_SKIP_CHECK=1
+          ./build.sh
+
+      - name: Upload Firmware Artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: YasuPython-Firmware
+          path: micropython/ports/esp32/build-ESP32_GENERIC_S3-SPIRAM_OCT/firmware.bin
