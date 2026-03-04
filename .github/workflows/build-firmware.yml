@@ -8,8 +8,6 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -17,15 +15,35 @@ jobs:
           python-version: '3.10'
 
       - name: Run Build Script
-          # Ensure build.sh is executable in the repo or chmod it here
+        id: build_step
+        continue-on-error: true # Allow the next step to run if this fails
         run: |
           chmod +x build.sh
           ./build.sh
 
-      - name: Upload Firmware Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: YasuPython-ESP32S3-N16R8
-          path: micropython/ports/esp32/build-ESP32_GENERIC_S3-SPIRAM_OCT/firmware.bin
-          if-no-files-found: error
-          retention-days: 7
+      - name: Gemini Self-Repair
+        if: steps.build_step.outcome == 'failure'
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          echo "Build failed. Consulting Gemini..."
+          # Capture the error logs
+          ERROR_LOG=$(tail -n 50 build_log.txt || echo "No log found")
+          
+          # Use curl to ask Gemini for a fix
+          RESPONSE=$(curl https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$GEMINI_API_KEY \
+              -H 'Content-Type: application/json' \
+              -X POST \
+              -d '{
+                "contents": [{
+                  "parts":[{"text": "The following build log for MicroPython ESP32-S3 failed. Provide a single bash command to fix it: '"$ERROR_LOG"'"}]
+                }]
+              }')
+          
+          # Extract the command and execute it (requires parsing the JSON response)
+          # For now, let's log the AI's suggestion
+          echo "Gemini Suggestion: $RESPONSE"
+          
+      - name: Final Check
+        if: steps.build_step.outcome == 'failure'
+        run: exit 1 # Fail the workflow after repair attempt so you can see it
