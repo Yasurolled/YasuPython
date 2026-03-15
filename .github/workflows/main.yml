@@ -3,19 +3,20 @@ name: ESP32-S3 CI
 on:
   push:
     branches: [ main ]
-  pull_request:
-    branches: [ main ]
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      # Node.js 20 uyarılarını susturmak ve geleceğe hazırlanmak için
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
       - name: Install ESP-IDF
-        # Bu action her şeyi otomatik ayarlar
+        # Marketplace'te gördüğün resmi Espressif action'ı
         uses: espressif/install-esp-idf-action@v1
         with:
           esp_idf_version: v5.1.2
